@@ -1,5 +1,5 @@
 /* Caches the app files so it opens with no signal. Bump CACHE when you change any file. */
-var CACHE = 'repair-photos-v4';
+var CACHE = 'repair-photos-v5';
 var FILES = ['./', 'index.html', 'style.css', 'lib.js', 'formdata.js', 'app.js', 'manifest.webmanifest',
   'icon-180.png', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', function (e) {

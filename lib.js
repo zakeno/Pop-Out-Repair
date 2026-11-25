@@ -162,6 +162,11 @@ function buildPdf(opts) {
         res.push(`/${name} ${id} 0 R`);
         ops.push(`q ${fmt(w)} 0 0 ${fmt(h)} ${fmt(x)} ${fmt(Y(top + h))} cm /${name} Do Q`);
       },
+      sigImage: (ph, x, top, w, h) => {
+        const sc = Math.min(w / ph.w, h / ph.h);
+        const dw = ph.w * sc, dh = ph.h * sc;
+        P.image(ph, x + (w - dw) / 2, top + (h - dh), dw, dh);
+      },
       logo: (x, top, w, h) => {
         if (!logoId) return;
         const sc = Math.min((w - 8) / opts.logo.w, (h - 6) / opts.logo.h);
@@ -282,6 +287,7 @@ function buildPdf(opts) {
         y += h + 4;
         // readiness statement
         P.text('The above item(s) have been checked and is/are ready for repairs:', M, y + 10, 7.2, false);
+        if (p1.signature) P.sigImage(p1.signature, M + 300, y - 2, 200, 17);
         P.line(M + 300, y + 16, M + 500, y + 16, 0.6);
         P.ctext('Construction Representative (Signature)', M + 300, 200, y + 24, 6.6, false);
         P.text('SHL Representative will be present during repair YES/NO', M, y + 36, 7.2, false);
@@ -309,61 +315,78 @@ function buildPdf(opts) {
     y += gh + 5;
 
     // signature block
-    const bw = CW / 3, hh2 = 12, rh2 = 13;
+    const bw = CW / 3, hh2 = 12, rh2 = 13, SIGH = 26;
     const blocks = [
-      { t: 'PRODUCTION REPRESENTATIVE (FGJV)', name: p1.prodName || '', desig: p1.prodDesig || '' },
+      { t: 'PRODUCTION REPRESENTATIVE (FGJV)', name: p1.prodName || '', desig: p1.prodDesig || '', sig: p1.signature || null },
       { t: 'QUA REPRESENTATIVE (FGJV)', name: '', desig: '' },
       { t: 'CLIENT REPRESENTATIVE (SHL)', name: '', desig: '', np: !p1.shlPresent },
     ];
     blocks.forEach((b, i) => {
       const x0 = M + i * bw;
       P.rectFill(x0, y, bw, hh2, '0.85 0.85 0.85');
-      P.rect(x0, y, bw, hh2 + rh2 * 4, 0.8);
+      P.rect(x0, y, bw, hh2 + rh2 * 3 + SIGH, 0.8);
       P.line(x0, y + hh2, x0 + bw, y + hh2, 0.8);
       P.ctext(b.t, x0, bw, y + 8.6, 7, true);
+      let ry = y + hh2;
       ['NAME:', 'DESIGNATION:', 'SIGNATURE:', 'DATE:'].forEach((lab, r) => {
-        const ry = y + hh2 + r * rh2;
+        const rh = r === 2 ? SIGH : rh2;
         if (r > 0) P.line(x0, ry, x0 + bw, ry, 0.5, '0.4 0.4 0.4');
         P.text(lab, x0 + 3, ry + 9, 6.6, true);
         const lw = strW(lab, 6.6, true) + 8;
         if (r === 0 && b.name) P.text(b.name, x0 + 3 + lw, ry + 9, 7, true);
         if (r === 1 && b.desig) P.text(b.desig, x0 + 3 + lw, ry + 9, 7, true);
+        if (r === 2 && b.sig) P.sigImage(b.sig, x0 + 3 + lw, ry + 1, bw - lw - 8, rh - 2);
+        ry += rh;
       });
       if (b.np) {
-        const ry1 = y + hh2 + rh2, ry2 = y + hh2 + rh2 * 3;
+        const ry1 = y + hh2 + rh2, ry2 = y + hh2 + rh2 * 2 + SIGH;
         P.rectFill(x0 + 90, ry1 + 0.5, bw - 91, ry2 - ry1 - 1, '1 1 1');
         P.ctext('NOT PRESENT', x0 + 90, bw - 90, (ry1 + ry2) / 2 + 2.8, 7.6, true);
       }
     });
-    y += hh2 + rh2 * 4;
+    y += hh2 + rh2 * 3 + SIGH;
     opts.__page1EndY = y;
     finishPage(P);
   }
 
-  /* ---------- photo pages : one per segment ---------- */
-  segs.forEach((seg) => {
+  /* ---------- photo pages : two segments per page, side by side ---------- */
+  const GAP = 10, COLW = (CW - GAP) / 2;
+  for (let i = 0; i < segs.length; i += 2) {
+    const pair = [segs[i], segs[i + 1] || null];
     const P = newPage();
-    let top = header(P, opts.title2, opts.formNo + '[A]', opts.utn, seg.label, seg.type ? [seg.type] : []);
-    const BLOCK = 214, BAR = 18;
-    opts.stages.forEach((st) => {
-      P.rectFill(M, top, CW, BAR, AMBER);
-      P.rect(M, top, CW, BAR, 0.8);
-      P.ctext(st.label, M, CW, top + 13, 10, true);
-      const ph = seg.photos ? seg.photos[st.k] : null;
-      const areaTop = top + BAR, areaH = BLOCK - BAR;
-      P.rect(M, areaTop, CW, areaH, 0.6, '0.6 0.6 0.6');
-      if (ph && ph.bytes) {
-        const pad = 6, bw = CW - 2 * pad, bh = areaH - 2 * pad;
-        const sc = Math.min(bw / ph.w, bh / ph.h);
-        const dw = ph.w * sc, dh = ph.h * sc;
-        P.image(ph, M + pad + (bw - dw) / 2, areaTop + pad + (bh - dh) / 2, dw, dh);
-      } else {
-        P.ctext('No photo taken', M, CW, areaTop + areaH / 2 + 3, 10, false, '0.5 0.5 0.5');
+    const ticked = pair.filter(Boolean).map((sg) => sg.type).filter(Boolean);
+    let top = header(P, opts.title2, opts.formNo + '[A]', opts.utn, null, ticked);
+    const SEGH = 16, BAR = 16, BLOCK = Math.floor((792 - 30 - top - SEGH - 4) / 3);
+    pair.forEach((seg, c) => {
+      const x = M + c * (COLW + GAP);
+      let y = top;
+      if (seg) {
+        P.rect(x, y, COLW, SEGH, 0.8);
+        P.ctext('SEGMENT ' + seg.label + (seg.type ? '  -  ' + seg.type : ''), x, COLW, y + 11.5, 9, true);
       }
-      top += BLOCK;
+      y += SEGH + 2;
+      opts.stages.forEach((st) => {
+        P.rectFill(x, y, COLW, BAR, AMBER);
+        P.rect(x, y, COLW, BAR, 0.8);
+        P.ctext(st.label, x, COLW, y + 11.5, 9.5, true);
+        const areaTop = y + BAR, areaH = BLOCK - BAR - 4;
+        P.rect(x, areaTop, COLW, areaH, 0.6);
+        const ph = seg && seg.photos ? seg.photos[st.k] : null;
+        if (!seg) {
+          P.ctext('N/A', x, COLW, areaTop + areaH / 2 + 14, 40, true);
+        } else if (ph && ph.bytes) {
+          const pad = 4, bw = COLW - 2 * pad, bh = areaH - 2 * pad;
+          const sc = Math.min(bw / ph.w, bh / ph.h);
+          const dw = ph.w * sc, dh = ph.h * sc;
+          P.image(ph, x + pad + (bw - dw) / 2, areaTop + pad + (bh - dh) / 2, dw, dh);
+        } else {
+          P.ctext('No photo taken', x, COLW, areaTop + areaH / 2 + 3, 10, false, '0.5 0.5 0.5');
+        }
+        y += BLOCK;
+      });
     });
     finishPage(P);
-  });
+  }
 
   objs[0] = latin1('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
   objs[1] = latin1(`2 0 obj\n<< /Type /Pages /Kids [${kids.map((k) => k + ' 0 R').join(' ')}] /Count ${kids.length} >>\nendobj\n`);

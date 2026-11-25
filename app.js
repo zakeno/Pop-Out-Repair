@@ -3,7 +3,7 @@
   'use strict';
   var STAGES = [
     { k: 'pre', label: 'Pre Repair', short: 'Pre', file: 'Pre' },
-    { k: 'during', label: 'During Repair', short: 'During', file: 'During' },
+    { k: 'during', label: 'In Progress Repair', short: 'During', file: 'During' },
     { k: 'post', label: 'Post Repair', short: 'Post', file: 'Post' }
   ];
   var LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'K'];
@@ -22,7 +22,7 @@
   function dstr(t) { var d = new Date(t); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
   function cleanId(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 12); }
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
-  function S() { return state.settings || { id: SETTINGS_ID, fgjv: '', qua: '', shl: '', prodName: '', prodDesig: '', logo: null }; }
+  function S() { return state.settings || { id: SETTINGS_ID, fgjv: '', qua: '', shl: '', prodName: '', prodDesig: '', logo: null, sig: null }; }
   function needSetup() { var s = S(); return !s.fgjv || !s.qua; }
 
   /* ---------- storage (IndexedDB, this phone only) ---------- */
@@ -168,7 +168,7 @@
     });
     inp.click();
   }
-  function pickLogo() {
+  function pickImage(key, size, msg) {
     var inp = document.createElement('input');
     inp.type = 'file'; inp.accept = 'image/*';
     inp.style.display = 'none';
@@ -177,14 +177,17 @@
       var f = inp.files && inp.files[0];
       inp.remove();
       if (!f) return;
-      toJpeg(f, 700, 0.92, true).then(function (r) {
-        var s = S(); s.id = SETTINGS_ID; s.logo = r;
+      toJpeg(f, size, 0.92, true).then(function (r) {
+        var s = S(); s.id = SETTINGS_ID; s[key] = r;
         state.settings = s;
-        return dbPut(s).then(function () { renderKeepSettings(); toast('Logo saved on this phone.'); });
+        return dbPut(s).then(function () { renderKeepSettings(); toast(msg); });
       }).catch(function () { toast('That image could not be read.'); });
     });
     inp.click();
   }
+
+  function pickLogo() { pickImage('logo', 700, 'Logo saved on this phone.'); }
+  function pickSig() { pickImage('sig', 800, 'Signature saved on this phone.'); }
 
   /* ---------- export ---------- */
   function segName(s) { return cleanId(s.label) || 'SEG'; }
@@ -221,7 +224,8 @@
         repairType: FORM.repairType, cms: FORM.cms,
         remarks: u.segments.map(function (x) { return 'Seg ' + x.label + ' - ' + x.repairs + 'x'; }),
         initials: { c: s.fgjv, q: s.qua, s: s.shl || 'Not present' },
-        shlPresent: !!s.shl, prodName: s.prodName, prodDesig: s.prodDesig
+        shlPresent: !!s.shl, prodName: s.prodName, prodDesig: s.prodDesig,
+        signature: s.sig ? { bytes: new Uint8Array(s.sig.buf), w: s.sig.w, h: s.sig.h } : null
       }
     });
   }
@@ -341,6 +345,15 @@
       h += '<p class="note" style="margin:0">Choose an image of the logo from your phone (for example a screenshot of the form header). It is stored on this phone only and printed at the top left of each page.</p><button data-act="logo">Choose logo image</button>';
     }
     h += '</div>';
+    h += '<div class="card"><h2>Your signature</h2>';
+    if (s.sig) {
+      var su = URL.createObjectURL(new Blob([s.sig.buf], { type: 'image/jpeg' }));
+      urls.push(su);
+      h += '<div class="logo-prev"><img alt="Signature preview" src="' + su + '"></div><div class="row"><button class="grow" data-act="sig">Take another</button><button class="grow danger" data-act="rmsig">Remove</button></div>';
+    } else {
+      h += '<p class="note" style="margin:0">Sign on white paper and photograph it. It is stored on this phone only and printed in the Production Representative signature boxes. Leave it out to sign by hand later.</p><button data-act="sig">Add signature photo</button>';
+    }
+    h += '</div>';
     return h;
   }
   function stageHtml(seg, st) {
@@ -383,7 +396,7 @@
       STAGES.forEach(function (st) { h += stageHtml(s, st); });
       h += '</div></div>';
     });
-    h += '<div class="card"><h2>Export</h2><div class="row"><button class="primary grow" data-act="pdf">Save PDF</button></div><div class="row"><button class="grow" data-act="jpgs">Save to Photos</button><button class="grow" data-act="zip">Photos as ZIP</button></div><p class="note" style="margin:0">The PDF is page 1 of Form 0008 followed by one photo page per segment. Signatures and dates are left blank. ZIP and Photos use names like ' + esc(u.utn) + '_K_Pre_' + dstr(Date.now()) + '.jpg.</p></div>';
+    h += '<div class="card"><h2>Export</h2><div class="row"><button class="primary grow" data-act="pdf">Save PDF</button></div><div class="row"><button class="grow" data-act="jpgs">Save to Photos</button><button class="grow" data-act="zip">Photos as ZIP</button></div><p class="note" style="margin:0">The PDF is page 1 of Form 0008 followed by one photo page per segment. Date fields are left blank; your signature is added if saved in Settings. ZIP and Photos use names like ' + esc(u.utn) + '_K_Pre_' + dstr(Date.now()) + '.jpg.</p></div>';
     h += '<button class="danger" data-act="rmutn">Delete this UTN</button>';
     return h;
   }
@@ -456,6 +469,8 @@
     else if (act === 'back') go('home', null);
     else if (act === 'settings') go('settings');
     else if (act === 'logo') pickLogo();
+    else if (act === 'sig') pickSig();
+    else if (act === 'rmsig') { var s1 = S(); s1.id = SETTINGS_ID; s1.sig = null; state.settings = s1; dbPut(s1).then(renderKeepSettings); }
     else if (act === 'rmlogo') { var s0 = S(); s0.id = SETTINGS_ID; s0.logo = null; state.settings = s0; dbPut(s0).then(renderKeepSettings); }
     else if (act === 'addseg' && u) addSeg(u, b.getAttribute('data-l'));
     else if (act === 'settype' && u) { var sg = segObj(); if (sg) { sg.type = b.getAttribute('data-t'); save(u).then(function () { var y = window.scrollY; render(); window.scrollTo(0, y); }); } }
